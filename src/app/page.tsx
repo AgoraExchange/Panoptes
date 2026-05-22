@@ -77,7 +77,7 @@ const DataThroughput = () => {
 };
 
 const NEXT_DEV_BADGE_POSITION_KEY = 'panoptes.nextDevBadgePosition';
-const SUPPORT_PROJECT_URL = 'https://panoptes-lilac.vercel.app/?lat=30.0822&lon=-97.3563&zoom=8.10&layers=flights%2Cprivate%2Cjets%2Cmilitary%2Ccctv%2Clive_news%2Cnews_intel%2Cearthquakes%2Cglobal_incidents%2Cday_night';
+const SUPPORT_PROJECT_URL = 'https://ko-fi.com/agoraexchange';
 
 export default function Dashboard() {
   const dataRef = useRef<any>({});
