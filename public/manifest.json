@@ -2,11 +2,13 @@
   "name": "Panoptes - Global Intelligence Platform",
   "short_name": "Panoptes",
   "description": "Real-time global intelligence dashboard managed by Agora Exchange.",
+  "id": "/",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#06060C",
-  "theme_color": "#D4AF37",
-  "orientation": "landscape-primary",
+  "theme_color": "#06060C",
+  "orientation": "any",
   "categories": ["security", "intelligence", "analytics", "news"],
   "icons": [
     {
@@ -16,16 +18,22 @@
       "purpose": "any"
     },
     {
-      "src": "/osiris-icon.png",
+      "src": "/android-chrome-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/android-chrome-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
     },
     {
-      "src": "/icon-192.png",
-      "sizes": "192x192",
+      "src": "/apple-touch-icon.png",
+      "sizes": "180x180",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }

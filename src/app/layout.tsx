@@ -176,6 +176,7 @@ const jsonLd = {
 import { Analytics } from "@vercel/analytics/next";
 
 import ErrorBoundary from '@/components/ErrorBoundary';
+import PwaBootstrap from '@/components/PwaBootstrap';
 
 export default function RootLayout({
   children,
@@ -191,7 +192,13 @@ export default function RootLayout({
         <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
         <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+        <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
         <link rel="canonical" href={SITE_URL} />
+        <meta name="application-name" content="Panoptes" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-title" content="Panoptes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="format-detection" content="telephone=no" />
         
         {/* JSON-LD Structured Data */}
         <script
@@ -203,6 +210,7 @@ export default function RootLayout({
         <ErrorBoundary name="Panoptes Core">
           {children}
         </ErrorBoundary>
+        <PwaBootstrap />
         <Analytics />
       </body>
     </html>
