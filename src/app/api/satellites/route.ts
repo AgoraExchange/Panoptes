@@ -172,7 +172,7 @@ async function fetchTLEFromSource(source: typeof TLE_SOURCES[0]): Promise<string
   try {
     const res = await fetch(source.url, {
       signal: AbortSignal.timeout(12000),
-      headers: { 'User-Agent': 'OSIRIS-Intelligence-Platform/3.4' },
+      headers: { 'User-Agent': 'Panoptes-Intelligence-Platform/3.4' },
     });
     if (!res.ok) return null;
     const text = await res.text();

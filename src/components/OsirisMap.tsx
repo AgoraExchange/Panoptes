@@ -11,7 +11,8 @@ interface OsirisMapProps {
   onMouseCoords?: (coords: { lat: number; lng: number }) => void;
   onRightClick?: (coords: { lat: number; lng: number }) => void;
   onViewStateChange?: (vs: { zoom: number; latitude: number }) => void;
-  flyToLocation?: { lat: number; lng: number; ts: number } | null;
+  flyToLocation?: { lat: number; lng: number; zoom?: number; ts: number } | null;
+  userLocation?: { lat: number; lng: number; accuracy?: number; ts: number } | null;
   projection?: 'mercator' | 'globe';
   mapStyle?: string;
   sweepData?: any;
@@ -39,7 +40,7 @@ function computeSolarTerminator(): [number, number][] {
 
 const EMPTY_FC = { type: 'FeatureCollection' as const, features: [] };
 
-function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, projection = 'globe', mapStyle = 'dark', sweepData }: OsirisMapProps) {
+function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightClick, onViewStateChange, flyToLocation, userLocation, projection = 'globe', mapStyle = 'dark', sweepData }: OsirisMapProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const popupRef = useRef<maplibregl.Popup | null>(null);
@@ -108,7 +109,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
       createDot(map, 'dot-cctv', '#39FF14', 10);
 
       // Sources
-      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections'];
+      const sources = ['flights','military','jets','private-fl','satellites','earthquakes','gdelt','gps-jamming','day-night','user-location','cctv','fires','weather','infrastructure','maritime','maritime-choke','maritime-ships','live-news','sigint-news','conflict-zones', 'war-alerts-targets', 'war-alerts-lines', 'balloons', 'radiation', 'ip-sweep-devices', 'ip-sweep-pulse', 'ip-sweep-connections'];
       sources.forEach(s => map.addSource(s, { type: 'geojson', data: EMPTY_FC }));
 
       // ── CONFLICT ZONES — small warning markers (not polygons) ──
@@ -183,6 +184,28 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
       // Day/Night
       map.addLayer({ id: 'day-night-fill', type: 'fill', source: 'day-night', paint: { 'fill-color': '#000022', 'fill-opacity': 0.35 }});
+
+      map.addLayer({ id: 'user-accuracy', type: 'circle', source: 'user-location', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 3, 10, ['max', 14, ['/', ['coalesce', ['get', 'accuracy'], 50], 8]], 16, ['max', 24, ['/', ['coalesce', ['get', 'accuracy'], 50], 2]]],
+        'circle-color': '#00E5FF',
+        'circle-opacity': 0.08,
+        'circle-stroke-width': 1,
+        'circle-stroke-color': '#00E5FF',
+        'circle-stroke-opacity': 0.25,
+      }});
+      map.addLayer({ id: 'user-pulse', type: 'circle', source: 'user-location', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 8, 10, 16, 16, 26],
+        'circle-color': '#00E5FF',
+        'circle-opacity': 0.16,
+        'circle-blur': 0.6,
+      }});
+      map.addLayer({ id: 'user-dot', type: 'circle', source: 'user-location', paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 2, 4, 10, 7, 16, 10],
+        'circle-color': '#00E5FF',
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#E8F7FF',
+        'circle-opacity': 0.95,
+      }});
 
       // Earthquakes
       map.addLayer({ id: 'eq-circles', type: 'circle', source: 'earthquakes', paint: {
@@ -783,6 +806,15 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
 
   useEffect(() => {
     if (!mapReady) return;
+    setGeo('user-location', userLocation ? [{
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [userLocation.lng, userLocation.lat] },
+      properties: { accuracy: userLocation.accuracy || 0, ts: userLocation.ts },
+    }] : []);
+  }, [mapReady, userLocation, setGeo]);
+
+  useEffect(() => {
+    if (!mapReady) return;
     setGeo('satellites', activeLayers.satellites && data.satellites ? data.satellites.map((s: any) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [s.lng, s.lat] }, properties: { name: s.name, color: s.color, mission: s.mission } })) : []);
   }, [mapReady, data.satellites, activeLayers.satellites, setGeo]);
 
@@ -980,7 +1012,7 @@ function OsirisMap({ data, activeLayers, onEntityClick, onMouseCoords, onRightCl
   // Fly-to
   useEffect(() => {
     if (!mapReady || !mapRef.current || !flyToLocation) return;
-    mapRef.current.flyTo({ center: [flyToLocation.lng, flyToLocation.lat], zoom: 8, duration: 2000 });
+    mapRef.current.flyTo({ center: [flyToLocation.lng, flyToLocation.lat], zoom: flyToLocation.zoom ?? 8, duration: 2000 });
   }, [mapReady, flyToLocation]);
 
   // Dynamic projection switching (lightweight — no terrain DEM)

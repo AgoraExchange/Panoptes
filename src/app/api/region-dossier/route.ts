@@ -17,7 +17,7 @@ export async function GET(request: Request) {
       `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&zoom=5&addressdetails=1`,
       {
         signal: AbortSignal.timeout(8000),
-        headers: { 'User-Agent': 'OsirisIntelPlatform/1.0' },
+        headers: { 'User-Agent': 'PanoptesIntelPlatform/1.0' },
       }
     );
 
@@ -93,7 +93,7 @@ export async function GET(request: Request) {
             `https://query.wikidata.org/sparql?format=json&query=${encodeURIComponent(sparql)}`,
             {
               signal: AbortSignal.timeout(5000),
-              headers: { 'User-Agent': 'OsirisIntelPlatform/1.0' },
+              headers: { 'User-Agent': 'PanoptesIntelPlatform/1.0' },
             }
           );
           if (res.ok) {

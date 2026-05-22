@@ -23,7 +23,7 @@ export async function GET() {
       try {
         const res = await fetch(url, {
           signal: AbortSignal.timeout(15000),
-          headers: { 'User-Agent': 'OSIRIS-Intelligence-Platform/3.5' },
+          headers: { 'User-Agent': 'Panoptes-Intelligence-Platform/3.5' },
         });
         if (res.ok) {
           const text = await res.text();

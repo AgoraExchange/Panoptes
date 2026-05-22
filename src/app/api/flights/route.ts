@@ -52,6 +52,8 @@ const MILITARY_INDICATORS = new Set([
 ]);
 
 const AIRLINE_CODE_RE = /^([A-Z]{3})\d/;
+const OPENSKY_USERNAME = process.env.OPENSKY_USERNAME || '';
+const OPENSKY_PASSWORD = process.env.OPENSKY_PASSWORD || '';
 
 async function fetchRegion(region: typeof REGIONS[0]): Promise<any[]> {
   try {
@@ -68,6 +70,31 @@ async function fetchRegion(region: typeof REGIONS[0]): Promise<any[]> {
     console.warn(`Region fetch failed for lat=${region.lat}:`, e);
   }
   return [];
+}
+
+async function fetchOpenSkyStates(): Promise<any[]> {
+  if (!OPENSKY_USERNAME || !OPENSKY_PASSWORD) return [];
+
+  try {
+    const auth = Buffer.from(`${OPENSKY_USERNAME}:${OPENSKY_PASSWORD}`).toString('base64');
+    const res = await fetch('https://opensky-network.org/api/states/all', {
+      signal: AbortSignal.timeout(15000),
+      headers: {
+        Accept: 'application/json',
+        Authorization: `Basic ${auth}`,
+        'User-Agent': 'Panoptes-Flight-Tracker/1.0',
+      },
+    });
+    if (!res.ok) {
+      console.warn(`OpenSky fetch failed: ${res.status}`);
+      return [];
+    }
+    const data = await res.json();
+    return Array.isArray(data.states) ? data.states : [];
+  } catch (e) {
+    console.warn('OpenSky fetch failed:', e instanceof Error ? e.message : e);
+    return [];
+  }
 }
 
 function classifyFlight(f: any) {
@@ -124,6 +151,60 @@ function classifyFlight(f: any) {
   };
 }
 
+function classifyOpenSkyFlight(state: any[]) {
+  const [
+    icao24,
+    rawCallsign,
+    originCountry,
+    ,
+    ,
+    longitude,
+    latitude,
+    baroAltitude,
+    onGround,
+    velocity,
+    trueTrack,
+    ,
+    ,
+    geoAltitude,
+    squawk,
+    ,
+    ,
+    categoryCode,
+  ] = state;
+
+  if (latitude == null || longitude == null) return null;
+
+  const callsign = (rawCallsign || '').trim().toUpperCase() || icao24 || 'UNKNOWN';
+  const airlineMatch = AIRLINE_CODE_RE.exec(callsign);
+  const airlineCode = airlineMatch ? airlineMatch[1] : '';
+  const isHeli = categoryCode === 7;
+  const militaryPattern = /^(RCH|KING|DUKE|EVAC|JAKE|REACH|CONVOY)\d/i.test(callsign);
+  let category: 'commercial' | 'private' | 'jet' | 'military' = 'commercial';
+  if (militaryPattern) category = 'military';
+  else if (!airlineCode) category = categoryCode === 6 ? 'jet' : 'private';
+
+  return {
+    callsign,
+    lat: Math.round(latitude * 100000) / 100000,
+    lng: Math.round(longitude * 100000) / 100000,
+    alt: Math.round(typeof geoAltitude === 'number' ? geoAltitude : (baroAltitude || 0)),
+    heading: Math.round(trueTrack || 0),
+    speed_knots: typeof velocity === 'number' ? Math.round(velocity * 1.94384 * 10) / 10 : null,
+    model: 'Unknown',
+    icao24: icao24 || '',
+    registration: 'N/A',
+    squawk: squawk || '',
+    origin_country: originCountry || '',
+    airline_code: airlineCode,
+    aircraft_category: isHeli ? 'heli' : 'plane',
+    category,
+    grounded: Boolean(onGround),
+    source: 'opensky',
+    type: 'flight',
+  };
+}
+
 // In-memory cache to prevent global fan-out abuse
 // NOTE (Issue #110): This cache is per-isolate in serverless environments (Vercel).
 // Multiple isolates may each hold their own cache, but this is acceptable because:
@@ -160,23 +241,31 @@ export async function GET() {
 
   const JAMMING_NACAP_THRESHOLD = 4;
 
-  // Start new global fetch
   fetchPromise = (async () => {
-    // Fetch all 6 regions in parallel
-    const regionResults = await Promise.allSettled(
-      REGIONS.map(r => fetchRegion(r))
-    );
-
     const allRaw: any[] = [];
     const seenHex = new Set<string>();
+    let dataSource: 'opensky' | 'adsb.lol' = 'adsb.lol';
 
-    for (const result of regionResults) {
-      if (result.status === 'fulfilled') {
-        for (const ac of result.value) {
-          const hex = (ac.hex || '').toLowerCase().trim();
-          if (hex && !seenHex.has(hex)) {
-            seenHex.add(hex);
-            allRaw.push(ac);
+    const openskyStates = await fetchOpenSkyStates();
+    if (openskyStates.length > 0) {
+      dataSource = 'opensky';
+      for (const state of openskyStates) {
+        const hex = String(state[0] || '').toLowerCase().trim();
+        if (hex && !seenHex.has(hex)) {
+          seenHex.add(hex);
+          allRaw.push(state);
+        }
+      }
+    } else {
+      const regionResults = await Promise.allSettled(REGIONS.map(r => fetchRegion(r)));
+      for (const result of regionResults) {
+        if (result.status === 'fulfilled') {
+          for (const ac of result.value) {
+            const hex = (ac.hex || '').toLowerCase().trim();
+            if (hex && !seenHex.has(hex)) {
+              seenHex.add(hex);
+              allRaw.push(ac);
+            }
           }
         }
       }
@@ -190,7 +279,7 @@ export async function GET() {
     const gpsJamming: any[] = [];
 
     for (const raw of allRaw) {
-      const flight = classifyFlight(raw);
+      const flight = dataSource === 'opensky' ? classifyOpenSkyFlight(raw) : classifyFlight(raw);
       if (!flight) continue;
 
       // GPS jamming detection
@@ -221,6 +310,7 @@ export async function GET() {
       military_flights: military,
       gps_jamming: jammingZones,
       total: allRaw.length,
+      source: dataSource,
       timestamp: new Date().toISOString(),
     };
   })();

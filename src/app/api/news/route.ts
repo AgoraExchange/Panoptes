@@ -24,7 +24,7 @@ const BG_NEWS_SOURCES = new Set(['Dnevnik', 'Actualno', 'Mediapool']);
 const SOFIA_COORDS: [number, number] = [42.698, 25.485];
 
 const RSS_FETCH_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (compatible; OSIRIS/1.0; +https://github.com/simplifaisoul/osiris)',
+  'User-Agent': 'Mozilla/5.0 (compatible; Panoptes/1.0; +https://panoptes.agora.exchange)',
   Accept: 'application/rss+xml, application/xml, text/xml, */*',
 };
 

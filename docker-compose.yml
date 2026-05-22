@@ -1,5 +1,5 @@
 services:
-  osiris:
+  panoptes:
     build:
       context: .
       dockerfile: Dockerfile

@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Layers, BarChart3, Newspaper, Search, Share2, Map as MapIcon, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Building2, RadioTower, Activity, Shield, Database, Wifi } from 'lucide-react';
+import { Layers, BarChart3, Newspaper, Search, Share2, Map as MapIcon, X, Globe, MapPinned, Radar, Satellite, Moon, ExternalLink, AlertTriangle, Building2, RadioTower, Activity, Shield, Database, Wifi, LocateFixed } from 'lucide-react';
 import IntelFeed from '@/components/IntelFeed';
 import MarketsPanel from '@/components/MarketsPanel';
 import SearchBar from '@/components/SearchBar';
@@ -15,7 +15,7 @@ import KeyboardShortcuts from '@/components/KeyboardShortcuts';
 import GlobalStatusBar from '@/components/GlobalStatusBar';
 import LiveAlerts from '@/components/LiveAlerts';
 
-const OsirisMap = dynamic(() => import('@/components/OsirisMap'), { ssr: false });
+const PanoptesMap = dynamic(() => import('@/components/OsirisMap'), { ssr: false });
 const LayerPanel = dynamic(() => import('@/components/LayerPanel'));
 const CameraViewer = dynamic(() => import('@/components/CameraViewer'));
 const OsintPanel = dynamic(() => import('@/components/OsintPanel'));
@@ -76,6 +76,8 @@ const DataThroughput = () => {
   return <span className="text-[var(--alert-green)] font-bold tabular-nums">{throughput} MB/s</span>;
 };
 
+const NEXT_DEV_BADGE_POSITION_KEY = 'panoptes.nextDevBadgePosition';
+
 export default function Dashboard() {
   const dataRef = useRef<any>({});
   const [dataVersion, setDataVersion] = useState(0);
@@ -83,7 +85,9 @@ export default function Dashboard() {
 
   const [backendStatus, setBackendStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
   const [mapView, setMapView] = useState({ zoom: 2.5, latitude: 20 });
-  const [flyToLocation, setFlyToLocation] = useState<{ lat: number; lng: number; ts: number } | null>(null);
+  const [flyToLocation, setFlyToLocation] = useState<{ lat: number; lng: number; zoom?: number; ts: number } | null>(null);
+  const [userLocation, setUserLocation] = useState<{ lat: number; lng: number; accuracy?: number; ts: number } | null>(null);
+  const [locationStatus, setLocationStatus] = useState<'idle'|'tracking'|'denied'|'error'>('idle');
   const [mouseCoords, setMouseCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [locationLabel, setLocationLabel] = useState('');
   const [regionDossier, setRegionDossier] = useState<any>(null);
@@ -105,6 +109,7 @@ export default function Dashboard() {
   const geocodeCache = useRef<Map<string, string>>(new Map());
   const geocodeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastGeocodedPos = useRef<{ lat: number; lng: number } | null>(null);
+  const locationWatchRef = useRef<number | null>(null);
 
   // ── DEFAULT: Most layers OFF — fast initial load ──
   const [activeLayers, setActiveLayers] = useState({
@@ -159,6 +164,196 @@ export default function Dashboard() {
       });
     }
   }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const cached = window.localStorage.getItem('panoptes.userLocation');
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (typeof parsed.lat === 'number' && typeof parsed.lng === 'number') {
+          setUserLocation(parsed);
+        }
+      } catch {}
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const clamp = (pos: { x: number; y: number }, el: HTMLElement) => ({
+      x: Math.min(Math.max(8, pos.x), Math.max(8, window.innerWidth - el.offsetWidth - 8)),
+      y: Math.min(Math.max(8, pos.y), Math.max(8, window.innerHeight - el.offsetHeight - 8)),
+    });
+
+    const attach = (root: HTMLElement) => {
+      if (root.dataset.panoptesDraggable === 'true') return;
+      root.dataset.panoptesDraggable = 'true';
+      const initialRect = root.getBoundingClientRect();
+      root.style.position = 'fixed';
+      root.style.right = 'auto';
+      root.style.bottom = 'auto';
+      root.style.left = `${initialRect.left}px`;
+      root.style.top = `${initialRect.top}px`;
+      root.style.zIndex = '2147483647';
+
+      const saved = window.localStorage.getItem(NEXT_DEV_BADGE_POSITION_KEY);
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (typeof parsed.x === 'number' && typeof parsed.y === 'number') {
+            const next = clamp(parsed, root);
+            root.style.left = `${next.x}px`;
+            root.style.top = `${next.y}px`;
+          }
+        } catch {}
+      }
+
+      const handle = document.createElement('div');
+      handle.setAttribute('data-panoptes-dev-badge-handle', 'true');
+      handle.title = 'Drag Dev Tools';
+      handle.style.position = 'fixed';
+      handle.style.width = '16px';
+      handle.style.height = '16px';
+      handle.style.borderRadius = '999px';
+      handle.style.background = 'rgba(0, 229, 255, 0.92)';
+      handle.style.border = '1px solid rgba(255,255,255,0.75)';
+      handle.style.boxShadow = '0 0 0 1px rgba(0,0,0,0.55), 0 4px 12px rgba(0,0,0,0.35)';
+      handle.style.cursor = 'grab';
+      handle.style.touchAction = 'none';
+      handle.style.zIndex = '2147483647';
+      handle.style.display = 'flex';
+      handle.style.alignItems = 'center';
+      handle.style.justifyContent = 'center';
+      handle.style.color = '#001014';
+      handle.style.fontSize = '10px';
+      handle.style.fontWeight = '900';
+      handle.style.lineHeight = '1';
+      handle.textContent = '⋮';
+      document.body.appendChild(handle);
+
+      const syncHandle = () => {
+        const rect = root.getBoundingClientRect();
+        handle.style.left = `${Math.max(2, rect.left - 6)}px`;
+        handle.style.top = `${Math.max(2, rect.top - 6)}px`;
+      };
+      syncHandle();
+
+      let drag: { pointerId: number; offsetX: number; offsetY: number } | null = null;
+
+      const onPointerDown = (event: PointerEvent) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const rect = root.getBoundingClientRect();
+        drag = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+        handle.style.cursor = 'grabbing';
+        try { handle.setPointerCapture(event.pointerId); } catch {}
+      };
+
+      const onPointerMove = (event: PointerEvent) => {
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const next = clamp({ x: event.clientX - drag.offsetX, y: event.clientY - drag.offsetY }, root);
+        root.style.left = `${next.x}px`;
+        root.style.top = `${next.y}px`;
+        syncHandle();
+      };
+
+      const onPointerUp = (event: PointerEvent) => {
+        if (!drag || drag.pointerId !== event.pointerId) return;
+        event.preventDefault();
+        event.stopPropagation();
+        try { handle.releasePointerCapture(event.pointerId); } catch {}
+        const rect = root.getBoundingClientRect();
+        const next = clamp({ x: rect.left, y: rect.top }, root);
+        root.style.left = `${next.x}px`;
+        root.style.top = `${next.y}px`;
+        syncHandle();
+        window.localStorage.setItem(NEXT_DEV_BADGE_POSITION_KEY, JSON.stringify(next));
+        handle.style.cursor = 'grab';
+        drag = null;
+      };
+
+      const onPointerCancel = (event: PointerEvent) => {
+        try { handle.releasePointerCapture(event.pointerId); } catch {}
+        handle.style.cursor = 'grab';
+        drag = null;
+      };
+
+      const onResize = () => {
+        const rect = root.getBoundingClientRect();
+        const next = clamp({ x: rect.left, y: rect.top }, root);
+        root.style.left = `${next.x}px`;
+        root.style.top = `${next.y}px`;
+        syncHandle();
+        window.localStorage.setItem(NEXT_DEV_BADGE_POSITION_KEY, JSON.stringify(next));
+      };
+
+      handle.addEventListener('pointerdown', onPointerDown);
+      handle.addEventListener('pointermove', onPointerMove);
+      handle.addEventListener('pointerup', onPointerUp);
+      handle.addEventListener('pointercancel', onPointerCancel);
+      window.addEventListener('resize', onResize);
+    };
+
+    const findAndAttach = () => {
+      const root = document.querySelector<HTMLElement>('[data-next-badge-root="true"]');
+      if (root) attach(root);
+    };
+
+    findAndAttach();
+    const observer = new MutationObserver(findAndAttach);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, []);
+
+  const applyUserPosition = useCallback((position: GeolocationPosition, fly = false) => {
+    const next = {
+      lat: position.coords.latitude,
+      lng: position.coords.longitude,
+      accuracy: position.coords.accuracy,
+      ts: Date.now(),
+    };
+    setUserLocation(next);
+    setLocationStatus('tracking');
+    window.localStorage.setItem('panoptes.userLocation', JSON.stringify(next));
+    if (fly) setFlyToLocation({ lat: next.lat, lng: next.lng, zoom: 14, ts: Date.now() });
+  }, []);
+
+  const startUserTracking = useCallback((fly = true) => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setLocationStatus('error');
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      position => applyUserPosition(position, fly),
+      error => setLocationStatus(error.code === error.PERMISSION_DENIED ? 'denied' : 'error'),
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 15000 },
+    );
+
+    if (locationWatchRef.current == null) {
+      locationWatchRef.current = navigator.geolocation.watchPosition(
+        position => applyUserPosition(position, false),
+        error => setLocationStatus(error.code === error.PERMISSION_DENIED ? 'denied' : 'error'),
+        { enableHighAccuracy: true, timeout: 20000, maximumAge: 10000 },
+      );
+    }
+  }, [applyUserPosition]);
+
+  useEffect(() => {
+    if (typeof navigator === 'undefined' || !navigator.permissions) return;
+    navigator.permissions.query({ name: 'geolocation' as PermissionName }).then(permission => {
+      if (permission.state === 'granted') startUserTracking(false);
+    }).catch(() => {});
+    return () => {
+      if (locationWatchRef.current != null && navigator.geolocation) {
+        navigator.geolocation.clearWatch(locationWatchRef.current);
+        locationWatchRef.current = null;
+      }
+    };
+  }, [startUserTracking]);
 
   // URL state: update URL on view change (debounced)
   const urlTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -218,7 +413,7 @@ export default function Dashboard() {
           setLocationLabel(label);
           lastGeocodedPos.current = coords;
         }
-      } catch (e) { console.warn('[OSIRIS] Suppressed error:', e instanceof Error ? e.message : e); }
+      } catch (e) { console.warn('[Panoptes] Suppressed error:', e instanceof Error ? e.message : e); }
     }, 3000); // 3s debounce (was 1.5s)
   }, []);
 
@@ -228,7 +423,7 @@ export default function Dashboard() {
     try {
       const res = await fetch(`/api/region-dossier?lat=${coords.lat}&lng=${coords.lng}`);
       if (res.ok) setRegionDossier(await res.json());
-    } catch (e) { console.warn('[OSIRIS] Suppressed error:', e instanceof Error ? e.message : e); } finally { setDossierLoading(false); }
+    } catch (e) { console.warn('[Panoptes] Suppressed error:', e instanceof Error ? e.message : e); } finally { setDossierLoading(false); }
   }, []);
 
   // Entity click handler (hoisted from JSX to comply with Rules of Hooks — Fixes #113)
@@ -253,7 +448,7 @@ export default function Dashboard() {
         setBackendStatus('connected');
       }
     } catch (e) {
-      console.warn('[OSIRIS] Suppressed error:', e instanceof Error ? e.message : e);
+      console.warn('[Panoptes] Suppressed error:', e instanceof Error ? e.message : e);
       setBackendStatus('error');
     }
   }, []);
@@ -270,7 +465,7 @@ export default function Dashboard() {
       try {
         const r = await fetch('/api/space-weather');
         if (r.ok) setSpaceWeather(await r.json());
-      } catch (e) { console.warn('[OSIRIS] Suppressed error:', e instanceof Error ? e.message : e); }
+      } catch (e) { console.warn('[Panoptes] Suppressed error:', e instanceof Error ? e.message : e); }
     }, 5000);
 
     // Polling — OPTIMIZED intervals to minimize edge requests
@@ -476,9 +671,9 @@ export default function Dashboard() {
               />
             </div>
 
-            {/* ── OSIRIS title — letter-by-letter stagger ── */}
+            {/* Panoptes title - letter-by-letter stagger */}
             <div className="flex items-center gap-[2px] mb-3 z-[2]">
-              {'OSIRIS'.split('').map((letter, i) => (
+              {'PANOPTES'.split('').map((letter, i) => (
                 <motion.span
                   key={i}
                   initial={{ opacity: 0, y: 20, filter: 'blur(8px)' }}
@@ -583,7 +778,7 @@ export default function Dashboard() {
 
       {/* ── MAP ── */}
       <ErrorBoundary name="Map">
-        <OsirisMap 
+        <PanoptesMap 
           data={data} 
           activeLayers={activeLayers} 
           projection={mapProjection} 
@@ -593,6 +788,7 @@ export default function Dashboard() {
           onRightClick={handleRightClick} 
           onViewStateChange={setMapView} 
           flyToLocation={flyToLocation}
+          userLocation={userLocation}
           sweepData={sweepData}
         />
       </ErrorBoundary>
@@ -633,6 +829,23 @@ export default function Dashboard() {
             {mapStyle === 'dark' ? 'SATELLITE' : 'NIGHT MODE'}
           </span>
         </button>
+
+        <button
+          onClick={() => {
+            if (userLocation) setFlyToLocation({ lat: userLocation.lat, lng: userLocation.lng, zoom: 14, ts: Date.now() });
+            startUserTracking(true);
+          }}
+          className={`glass-panel p-2.5 pointer-events-auto hover:border-[var(--cyan-primary)]/50 transition-colors group relative ${locationStatus === 'tracking' ? 'border-[var(--cyan-primary)]/40' : ''}`}
+          title={locationStatus === 'tracking' ? 'Zoom to your live location' : 'Track your live location'}
+        >
+          <LocateFixed className={`w-4 h-4 group-hover:scale-110 transition-transform ${locationStatus === 'tracking' ? 'text-[var(--cyan-primary)]' : locationStatus === 'denied' || locationStatus === 'error' ? 'text-[var(--alert-red)]' : 'text-[var(--gold-primary)]'}`} />
+          {locationStatus === 'tracking' && (
+            <span className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-[var(--alert-green)] animate-osiris-pulse" />
+          )}
+          <span className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 text-[9px] font-mono text-[var(--text-muted)] whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity glass-panel px-2 py-1 z-[300]">
+            {locationStatus === 'denied' ? 'LOCATION BLOCKED' : locationStatus === 'tracking' ? 'MY LOCATION' : 'LIVE PING'}
+          </span>
+        </button>
       </motion.div>
 
       {/* ── HEADER ── */}
@@ -655,7 +868,7 @@ export default function Dashboard() {
         <div className="hidden md:block absolute top-1/2 left-[52px] w-[200px] h-[1px] bg-gradient-to-r from-[var(--gold-primary)]/40 via-[var(--gold-primary)]/15 to-transparent" />
         <div className="flex flex-col">
           <div className="flex items-center gap-2">
-            <h1 className="text-base md:text-xl font-bold tracking-[0.4em] md:tracking-[0.5em] text-[var(--text-heading)] font-mono">OSIRIS</h1>
+            <h1 className="text-base md:text-xl font-bold tracking-[0.4em] md:tracking-[0.5em] text-[var(--text-heading)] font-mono">PANOPTES</h1>
             <span className="hidden md:inline-flex items-center gap-1 px-1.5 py-[1px] rounded-sm border border-[var(--cyan-primary)]/40 bg-[var(--cyan-primary)]/10 text-[7px] font-mono font-bold tracking-[0.15em] text-[var(--cyan-primary)] uppercase" style={{ lineHeight: '1.4' }}>
               <Globe className="w-2.5 h-2.5" />
               OPEN SOURCE
@@ -872,7 +1085,7 @@ export default function Dashboard() {
                 <div className="px-3 pb-3">
                   <div className="flex items-center justify-between mb-2">
                     <span className="hud-text text-[9px] text-[var(--text-primary)]">
-                      {mobilePanel === 'layers' ? 'LAYERS & STATS' : mobilePanel === 'markets' ? 'MARKETS & INTEL' : mobilePanel === 'intel' ? 'INTEL FEED' : mobilePanel === 'recon' ? 'OSIRIS RECON' : 'SEARCH'}
+                      {mobilePanel === 'layers' ? 'LAYERS & STATS' : mobilePanel === 'markets' ? 'MARKETS & INTEL' : mobilePanel === 'intel' ? 'INTEL FEED' : mobilePanel === 'recon' ? 'PANOPTES RECON' : 'SEARCH'}
                     </span>
                     <button onClick={() => setMobilePanel(null)} className="text-[var(--text-muted)] p-1"><X className="w-4 h-4" /></button>
                   </div>
